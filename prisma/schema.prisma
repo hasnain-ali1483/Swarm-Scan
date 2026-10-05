@@ -1,0 +1,269 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── SwarmScan Control Plane Schema ──────────────────────────────────────────
+
+model Scan {
+  id           String        @id @default(cuid())
+  target       String
+  scope        String        @default("external") // internal | external engagement
+  targetId     String? // registered Target this scan was launched against
+  targetRef    Target?       @relation(fields: [targetId], references: [id], onDelete: SetNull)
+  profile      String        @default("full") // quick | full | continuous
+  status       String        @default("queued") // queued | planning | running | verifying | completed | killed | failed
+  seed         String
+  policyTier   String        @default("standard") // safe | standard | aggressive
+  progress     Int           @default(0)
+  requestCount Int           @default(0)
+  agentCount   Int           @default(0)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime      @default(now())
+  agentRuns    AgentRun[]
+  findings     Finding[]
+  events       EventLog[]
+  chains       AttackChain[]
+  evidence     Evidence[]
+}
+
+model AgentRun {
+  id        String    @id @default(cuid())
+  scanId    String
+  scan      Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  agentKey  String
+  agentName String
+  version   String
+  state     String    @default("queued")
+  status    String    @default("pending") // pending | running | done | blocked | skipped | killed
+  progress  Int       @default(0)
+  requests  Int       @default(0)
+  findings  Int       @default(0)
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([scanId])
+  @@index([agentKey])
+}
+
+model Finding {
+  id          String     @id @default(cuid())
+  scanId      String
+  scan        Scan       @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  agentKey    String
+  title       String
+  severity    String // critical | high | medium | low | info
+  category    String
+  confidence  Float // 0..99
+  band        String // suspected | likely | confirmed
+  target      String
+  endpoint    String?
+  cve         String?
+  description String
+  pocScript   String?
+  priorOdds   Float      @default(0.02)
+  likelihood  Float      @default(1) // product of evidence likelihood ratios
+  createdAt   DateTime   @default(now())
+  evidence    Evidence[]
+
+  @@index([scanId, severity])
+  @@index([band])
+}
+
+// WORM evidence ledger — hash-chained, tamper-evident
+model Evidence {
+  id        String   @id @default(cuid())
+  findingId String?
+  finding   Finding? @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  scanId    String
+  scan      Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  kind      String // oob_callback | boolean_diff | time_contrast | error_match | dom_taint | version_map | reverify | decision
+  lr        Float    @default(1)
+  content   String
+  hash      String // sha256(prevHash + sequence + content)
+  prevHash  String
+  sequence  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([scanId, sequence])
+  @@index([findingId])
+}
+
+model EventLog {
+  id        String   @id @default(cuid())
+  scanId    String?
+  scan      Scan?    @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  type      String // agent_state | finding | policy | system | kill | oob | chain
+  message   String
+  meta      String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// OPA/Rego policy engine
+model Policy {
+  id        String   @id @default(cuid())
+  name      String
+  kind      String // rate_limit | payload_class | time_window | target_deny | data_touching
+  code      String
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+// Benchmark corpus regression runs (spec §6 — the scanner's CI)
+model BenchmarkRun {
+  id         String   @id @default(cuid())
+  runKey     String // groups rows of a single suite execution
+  agentKey   String
+  agentName  String
+  total      Int
+  passed     Int
+  failed     Int
+  fnRate     Float // false-negative rate 0..1
+  fpRate     Float // false-positive rate 0..1
+  durationMs Int
+  seed       String
+  createdAt  DateTime @default(now())
+
+  @@index([runKey])
+  @@index([createdAt])
+}
+
+// Scope firewall (eBPF-enforced CIDR policy)
+model ScopeRule {
+  id       String  @id @default(cuid())
+  name     String
+  cidrs    String // JSON array of CIDRs
+  mode     String  @default("allowlist") // allowlist | denylist
+  enforced Boolean @default(true)
+}
+
+// Registered engagement targets — a scan is a PREREQUISITE on an authorized
+// target. A target cannot be scanned until authorized=true (operator attests
+// they are permitted to test it). scope gates internal vs external pentest.
+model Target {
+  id          String    @id @default(cuid())
+  name        String
+  value       String // host, IP, CIDR or URL
+  scope       String    @default("external") // internal | external
+  // environment governs HOW FAR a scan may go:
+  //   lab      → owned/sandbox range; active proof-of-exploit permitted (owner-gated)
+  //   external → real target; SCANNING/DETECTION ONLY (e.g. bug-bounty "scan only")
+  environment String    @default("external") // lab | external
+  kind        String    @default("host") // host | cidr | url
+  authorized  Boolean   @default(false) // operator attestation gate
+  attestedBy  String?
+  attestedAt  DateTime?
+  note        String?
+  createdAt   DateTime  @default(now())
+  scans       Scan[]
+
+  @@index([scope])
+}
+
+// CorrelatorAgent attack-graph chains
+model AttackChain {
+  id          String  @id @default(cuid())
+  scanId      String
+  scan        Scan    @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  name        String
+  severity    String
+  verified    Boolean @default(false)
+  currentStep Int     @default(0)
+  steps       String // JSON [{title, action, status, findingId?}]
+  graph       String // JSON {nodes:[], edges:[]}
+
+  @@index([scanId])
+}
+
+model Integration {
+  id                String    @id @default(cuid())
+  key               String    @unique // stable catalog key — see src/lib/swarm/integrations-catalog.ts
+  name              String
+  category          String // recon | vulnerability | threat-intel | ticketing | siem | soar | communication | data | identity | mcp | ai | architecture | cicd | secrets
+  enabled           Boolean   @default(false)
+  config            String    // JSON — values only; field schema lives in the catalog
+  lastTestAt        DateTime?
+  lastTestOk        Boolean?
+  lastTestLatencyMs Int?
+  lastTestDetail    String?
+  lastSyncAt        DateTime?
+}
+
+// CI release gates — benchmark corpus verdicts gating agent-registry publishes
+// (spec §6 "the corpus is the CI": detection ≥ 90% AND FP < 2% per agent slice)
+model CiGate {
+  id            String   @id @default(cuid())
+  agentKey      String
+  agentName     String
+  releaseTag    String // e.g. "injection@1.4.0"
+  runKey        String // benchmark run the verdict was evaluated from
+  status        String // "passed" | "failed" | "running"
+  detectionRate Float // % (0..100)
+  fnRate        Float // % (0..100)
+  fpRate        Float // % (0..100)
+  durationMs    Int
+  verdictAt     DateTime
+  note          String // human verdict line
+
+  @@unique([agentKey, releaseTag])
+}
+
+// ─── Access control — RBAC, SSO, sessions, API keys (Task 9-b) ──────────────
+model AccessUser {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  name        String
+  role        String // owner | admin | operator | auditor | viewer
+  team        String
+  status      String    @default("active") // active | suspended
+  mfa         Boolean   @default(true)
+  provider    String    @default("okta-saml") // okta-saml | auth0-oidc | local
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  sessions    AccessSession[]
+}
+
+model AccessSession {
+  id        String   @id @default(cuid())
+  userId    String
+  user      AccessUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip        String
+  ua        String // user-agent fragment
+  location  String // "Berlin, DE · ASN 3320"
+  method    String // "SSO · SAML" | "SSO · OIDC" | "Password + MFA"
+  startedAt DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  label      String
+  prefix     String // visible fragment "ssk_live_7f3a…"
+  scopes     String // CSV of scope keys (SQLite has no lists)
+  createdBy  String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+}
+
+model SsoConnection {
+  id         String   @id @default(cuid())
+  kind       String // saml | oidc | scim
+  name       String
+  status     String // connected | pending | disabled
+  domain     String
+  detail     String // entityId / issuer / client id / SCIM endpoint
+  userCount  Int      @default(0)
+  lastSyncAt DateTime?
+}

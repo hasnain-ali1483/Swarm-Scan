@@ -1,0 +1,28 @@
+SwarmScan — Autonomous Vulnerability Scanner Platform
+========================================================
+
+Archived:  2026-10-03T09:15:53.478Z
+Entries:   286 files
+Stack:     Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · shadcn/ui ·
+           Prisma (SQLite) · TanStack Query · Zustand · socket.io · Framer Motion
+
+Layout
+------
+  src/                 Control-plane app (18 views, API routes, engine clients)
+  prisma/schema.prisma Data model (scans, findings, WORM evidence, policies…)
+  db/                  SQLite database (seedless — fills from real scans only)
+  mini-services/       scan-engine execution plane (port 3003, socket.io bus)
+  examples/            WebSocket reference demo
+  public/              Static assets
+
+Restore (Node.js 20+ / npm)
+---------------------------
+  1. npm install
+  2. npm run db:push        (regenerate the Prisma client)
+  3. npm run dev            (control plane on :3000)
+  4. cd mini-services/scan-engine && npm install && npm run dev   (engine on :3003, via tsx)
+
+Excluded from this archive: node_modules, .next build output, dev logs,
+tool-results, agent contexts, uploads and QA screenshots.
+
+© 2025 SwarmScan Labs — deterministic plans · WORM ledger active.
