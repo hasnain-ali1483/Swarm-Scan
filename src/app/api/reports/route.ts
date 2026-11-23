@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { serializeFinding } from "@/lib/swarm/server/serialize";
+import { generateRemediationPackage } from "@/lib/swarm/remediation";
 import type { Finding, ReportResponse, Severity } from "@/lib/swarm/types";
 
 export const dynamic = "force-dynamic";
@@ -50,9 +51,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "scanId query parameter is required" }, { status: 400 });
   }
   const formatParam = sp.get("format") ?? "executive";
-  if (!["executive", "technical", "sarif"].includes(formatParam)) {
+  if (!["executive", "technical", "sarif", "remediation"].includes(formatParam)) {
     return NextResponse.json(
-      { error: "format must be one of: executive, technical, sarif" },
+      { error: "format must be one of: executive, technical, sarif, remediation" },
       { status: 400 }
     );
   }
@@ -136,6 +137,19 @@ export async function GET(req: NextRequest) {
       format,
       generatedAt,
       sarif,
+    };
+    return NextResponse.json(body);
+  }
+
+  if (format === "remediation") {
+    const remediations = findings.map((f) => generateRemediationPackage(f));
+    const body: ReportResponse = {
+      scanId: scan.id,
+      target: scan.target,
+      format,
+      generatedAt,
+      findings,
+      remediations,
     };
     return NextResponse.json(body);
   }

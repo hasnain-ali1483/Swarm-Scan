@@ -24,13 +24,15 @@ import { useSwarmUi } from "@/lib/swarm/ui-store";
 import { ExecutiveReport } from "@/components/swarm/reports/executive-report";
 import { TechnicalReport } from "@/components/swarm/reports/technical-report";
 import { SarifViewer } from "@/components/swarm/reports/sarif-viewer";
+import { RemediationReport } from "@/components/swarm/reports/remediation-report";
 
-type ReportFormat = "executive" | "technical" | "sarif";
+type ReportFormat = "executive" | "technical" | "sarif" | "remediation";
 
 const FORMAT_META: Record<ReportFormat, { label: string; ext: string; mime: string }> = {
   executive: { label: "Executive", ext: "json", mime: "application/json" },
   technical: { label: "Technical", ext: "json", mime: "application/json" },
   sarif: { label: "SARIF 2.1", ext: "sarif", mime: "application/sarif+json" },
+  remediation: { label: "Virtual Patches & Remediation", ext: "json", mime: "application/json" },
 };
 
 export function ReportsView() {
@@ -247,8 +249,10 @@ export function ReportsView() {
           <ExecutiveReport report={report} />
         ) : format === "technical" ? (
           <TechnicalReport report={report} />
-        ) : (
+        ) : format === "sarif" ? (
           <SarifViewer sarif={report.sarif} />
+        ) : (
+          <RemediationReport report={report} />
         )}
       </div>
 

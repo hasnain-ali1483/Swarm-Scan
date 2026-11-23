@@ -1435,15 +1435,16 @@ export interface CreateScanPayload {
 export interface ReportResponse {
   scanId: string;
   target: string;
-  format: "executive" | "technical" | "sarif";
+  format: "executive" | "technical" | "sarif" | "remediation";
   generatedAt: string;
   // executive
   riskScore?: number;
   executiveSummary?: string;
   riskBreakdown?: { label: string; count: number; color: string }[];
   topChains?: { name: string; severity: string; verified: boolean }[];
-  // technical
+  // technical & remediation
   findings?: Finding[];
+  remediations?: unknown[];
   // sarif
   sarif?: unknown;
 }

@@ -33,6 +33,7 @@ import { useSwarmUi } from "@/lib/swarm/ui-store";
 import { ConfidencePanel } from "./confidence-panel";
 import { EvidenceChain } from "./evidence-chain";
 import { PocCard } from "./poc-card";
+import { RemediationCard } from "./remediation-card";
 import { BlockSkeleton, ErrorState } from "./states";
 import { downloadJson } from "./browser-utils";
 
@@ -164,6 +165,9 @@ export function FindingDetail({ findingId }: { findingId: string }) {
 
       {/* ── Bayesian confidence ────────────────────────────────────────────── */}
       <ConfidencePanel finding={{ ...finding, evidence }} />
+
+      {/* ── Autonomous Remediation & Virtual Patching ──────────────────────── */}
+      <RemediationCard finding={finding} />
 
       {/* ── Evidence chain + PoC/actions ───────────────────────────────────── */}
       <div className="grid items-start gap-4 lg:grid-cols-3">
