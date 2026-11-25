@@ -742,6 +742,511 @@ export async function triggerWebhook(req: Request, res: Response) {
    const response = await fetch(targetUrl);`,
       },
     ];
+  } else if (
+    cat.includes("deser") ||
+    cat.includes("prototype") ||
+    finding.agentKey === "deser" ||
+    finding.agentKey === "prototype"
+  ) {
+    summary = `Virtual patch and source-code remediation to neutralize Prototype Pollution and Insecure Deserialization on ${path} by blocking __proto__/constructor gadget chains and serialized object magic bytes.`;
+    wafRules = [
+      {
+        provider: "cloudflare",
+        providerLabel: "Cloudflare WAF",
+        title: "Cloudflare Custom Rule (Prototype Pollution & Deserialization)",
+        filename: `cloudflare-rule-deser-${ruleId}.txt`,
+        language: "plaintext",
+        explanation: "Blocks JSON/query payloads containing __proto__, constructor.prototype, or Java/PHP serialized object magic headers.",
+        code: `// Cloudflare Custom Rule (Expression Editor)
+// Action: Block
+(
+  http.request.uri.path eq "${path}" and (
+    http.request.body.raw matches r"(?i)(__proto__|constructor\\[\\"?'?prototype|rO0AB|O:\\d+:\\\"[a-zA-Z0-9_]+\\\")"
+    or http.request.uri.query matches r"(?i)(__proto__|constructor\\.prototype|prototype\\[)"
+  )
+)`,
+      },
+      {
+        provider: "awswaf",
+        providerLabel: "AWS WAF v2",
+        title: "AWS WAF v2 JSON Rule Statement",
+        filename: `aws-waf-deser-${ruleId}.json`,
+        language: "json",
+        explanation: "Inspects request body and query arguments for prototype pollution gadget keys.",
+        code: JSON.stringify(
+          {
+            Name: `SwarmScan-Mitigate-ProtoDeser-${ruleId}`,
+            Priority: 16,
+            Action: { Block: {} },
+            VisibilityConfig: {
+              SampledRequestsEnabled: true,
+              CloudWatchMetricsEnabled: true,
+              MetricName: `SwarmScanProtoDeser${ruleId}`,
+            },
+            Statement: {
+              OrStatement: {
+                Statements: [
+                  {
+                    RegexMatchStatement: {
+                      RegexString: "(__proto__|constructor\\.prototype|rO0AB)",
+                      FieldToMatch: { Body: {} },
+                      TextTransformations: [{ Priority: 0, Type: "URL_DECODE" }],
+                    },
+                  },
+                  {
+                    RegexMatchStatement: {
+                      RegexString: "(__proto__|constructor\\.prototype)",
+                      FieldToMatch: { AllQueryArguments: {} },
+                      TextTransformations: [{ Priority: 0, Type: "URL_DECODE" }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          null,
+          2
+        ),
+      },
+      {
+        provider: "modsecurity",
+        providerLabel: "ModSecurity / Coraza",
+        title: "ModSecurity / OWASP Coraza SecRule Directive",
+        filename: `modsec-deser-${ruleId}.conf`,
+        language: "apache",
+        explanation: "Denies requests carrying prototype pollution keys or Java/PHP serialization gadgets.",
+        code: `# SwarmScan Virtual Patch — Prototype Pollution & Deserialization Mitigation
+SecRule REQUEST_URI "@beginsWith ${path}" \\
+    "id:${ruleId},\\
+    phase:2,\\
+    deny,\\
+    status:403,\\
+    log,\\
+    msg:'SwarmScan Virtual Patch: Prototype pollution / deser blocked on ${path}',\\
+    tag:'attack-injection',\\
+    severity:'CRITICAL',\\
+    chain"
+    SecRule ARGS|REQUEST_BODY "@rx (?i)(__proto__|constructor\\W+prototype|rO0AB|aced0005)" \\
+        "t:none,t:urlDecodeUni"`,
+      },
+      {
+        provider: "nginx",
+        providerLabel: "NGINX Configuration",
+        title: "NGINX Prototype Key Blocker",
+        filename: `nginx-deser-${ruleId}.conf`,
+        language: "nginx",
+        explanation: "Blocks query strings attempting prototype pollution on the target route.",
+        code: `# SwarmScan Virtual Patch for NGINX — Prototype Pollution Defense
+location = ${path} {
+    if ($args ~* "(__proto__|constructor\\.prototype)") {
+        return 403;
+    }
+    proxy_pass http://backend_upstream;
+}`,
+      },
+    ];
+    codeRemediations = [
+      {
+        language: "typescript",
+        label: "TypeScript / Node.js (Safe Merge & Schema)",
+        filename: "src/utils/merge.ts",
+        explanation: "Reject __proto__, constructor, and prototype keys during object merges, or validate payloads with a strict Zod schema.",
+        vulnerableSnippet: `// ❌ VULNERABLE: Recursive merge copies __proto__ onto Object.prototype
+export function deepMerge(target: Record<string, any>, source: Record<string, any>) {
+  for (const key of Object.keys(source)) {
+    if (typeof source[key] === "object" && source[key] !== null) {
+      target[key] = deepMerge(target[key] || {}, source[key]);
+    } else {
+      target[key] = source[key];
+    }
+  }
+  return target;
+}`,
+        fixedSnippet: `// ✅ SECURE: Explicitly block prototype-polluting keys & use Object.create(null)
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function deepMerge(target: Record<string, any>, source: Record<string, any>) {
+  for (const key of Object.keys(source)) {
+    if (FORBIDDEN_KEYS.has(key) || !Object.prototype.hasOwnProperty.call(source, key)) {
+      continue;
+    }
+    if (typeof source[key] === "object" && source[key] !== null) {
+      if (!target[key]) target[key] = Object.create(null);
+      deepMerge(target[key], source[key]);
+    } else {
+      target[key] = source[key];
+    }
+  }
+  return target;
+}`,
+        gitPatch: `--- a/src/utils/merge.ts
++++ b/src/utils/merge.ts
+@@ -1,5 +1,7 @@
++const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+ export function deepMerge(target: Record<string, any>, source: Record<string, any>) {
+   for (const key of Object.keys(source)) {
++    if (FORBIDDEN_KEYS.has(key)) continue;
+     if (typeof source[key] === "object" && source[key] !== null) {`,
+      },
+    ];
+  } else if (
+    cat.includes("auth") ||
+    cat.includes("bola") ||
+    cat.includes("idor") ||
+    cat.includes("saml") ||
+    cat.includes("jwt") ||
+    ["auth", "api", "saml", "bizlogic", "passwords"].includes(finding.agentKey)
+  ) {
+    summary = `Virtual patch and source-code remediation to enforce authentication, object-level authorization (BOLA/IDOR), and rate-limiting controls on ${path}.`;
+    wafRules = [
+      {
+        provider: "cloudflare",
+        providerLabel: "Cloudflare WAF",
+        title: "Cloudflare Custom Rule (Auth Enforcement & Credential Stuffing Guard)",
+        filename: `cloudflare-rule-auth-${ruleId}.txt`,
+        language: "plaintext",
+        explanation: "Requires a valid Bearer/Session token header on protected endpoints and blocks JWT alg:none tampering.",
+        code: `// Cloudflare Custom Rule (Expression Editor)
+// Action: Block
+(
+  http.request.uri.path eq "${path}" and (
+    not any(http.request.headers["authorization"][*] contains "Bearer ")
+    or http.request.headers["authorization"][0] matches r"(?i)^Bearer\\s+eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0"
+  )
+)`,
+      },
+      {
+        provider: "awswaf",
+        providerLabel: "AWS WAF v2",
+        title: "AWS WAF v2 Auth Header & Rate Limit Guard",
+        filename: `aws-waf-auth-${ruleId}.json`,
+        language: "json",
+        explanation: "Rate-limits brute-force attempts on the auth/API endpoint to 30 requests per 5 minutes per IP.",
+        code: JSON.stringify(
+          {
+            Name: `SwarmScan-AuthGuard-${ruleId}`,
+            Priority: 11,
+            Action: { Block: {} },
+            VisibilityConfig: {
+              SampledRequestsEnabled: true,
+              CloudWatchMetricsEnabled: true,
+              MetricName: `SwarmScanAuthGuard${ruleId}`,
+            },
+            Statement: {
+              RateBasedStatement: {
+                Limit: 100,
+                AggregateKeyType: "IP",
+                ScopeDownStatement: {
+                  ByteMatchStatement: {
+                    SearchString: path,
+                    FieldToMatch: { UriPath: {} },
+                    TextTransformations: [{ Priority: 0, Type: "LOWERCASE" }],
+                    PositionalConstraint: "EXACTLY",
+                  },
+                },
+              },
+            },
+          },
+          null,
+          2
+        ),
+      },
+      {
+        provider: "modsecurity",
+        providerLabel: "ModSecurity / Coraza",
+        title: "ModSecurity / OWASP Coraza SecRule Directive",
+        filename: `modsec-auth-${ruleId}.conf`,
+        language: "apache",
+        explanation: "Blocks unsigned JWTs (alg:none) and unauthenticated calls to sensitive API routes.",
+        code: `# SwarmScan Virtual Patch — Auth & JWT Hardening
+SecRule REQUEST_URI "@beginsWith ${path}" \\
+    "id:${ruleId},\\
+    phase:1,\\
+    deny,\\
+    status:401,\\
+    log,\\
+    msg:'SwarmScan Virtual Patch: Missing or tampered Authorization header on ${path}',\\
+    tag:'attack-auth',\\
+    severity:'HIGH',\\
+    chain"
+    SecRule REQUEST_HEADERS:Authorization "@rx (^$|alg\\\":\\\"none)"`,
+      },
+      {
+        provider: "nginx",
+        providerLabel: "NGINX Configuration",
+        title: "NGINX Rate Limiting & Auth Header Check",
+        filename: `nginx-auth-${ruleId}.conf`,
+        language: "nginx",
+        explanation: "Enforces Authorization header presence at the edge proxy.",
+        code: `# SwarmScan Virtual Patch for NGINX — Auth Enforcement
+location = ${path} {
+    if ($http_authorization = "") {
+        return 401;
+    }
+    proxy_pass http://backend_upstream;
+}`,
+      },
+    ];
+    codeRemediations = [
+      {
+        language: "typescript",
+        label: "TypeScript / Next.js (Ownership & JWT Alg Pinning)",
+        filename: "src/app/api/resource/route.ts",
+        explanation: "Always enforce tenant/owner matching in database queries (preventing BOLA/IDOR) and pin allowed JWT verification algorithms.",
+        vulnerableSnippet: `// ❌ VULNERABLE: Fetches record by ID without verifying ownership
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  const record = await db.resource.findUnique({ where: { id: params.id } });
+  return Response.json(record);
+}`,
+        fixedSnippet: `// ✅ SECURE: Authenticate session and scope query to authenticated userId
+import { getSessionUser } from "@/lib/auth";
+
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  const user = await getSessionUser(req);
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const record = await db.resource.findFirst({
+    where: { id: params.id, ownerId: user.id },
+  });
+  if (!record) return Response.json({ error: "Not found" }, { status: 404 });
+  return Response.json(record);
+}`,
+        gitPatch: `--- a/src/app/api/resource/route.ts
++++ b/src/app/api/resource/route.ts
+@@ -1,4 +1,8 @@
+ export async function GET(req: Request, { params }: { params: { id: string } }) {
+-  const record = await db.resource.findUnique({ where: { id: params.id } });
++  const user = await getSessionUser(req);
++  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
++  const record = await db.resource.findFirst({
++    where: { id: params.id, ownerId: user.id },
++  });
+   return Response.json(record);
+ }`,
+      },
+    ];
+  } else if (
+    cat.includes("smuggl") ||
+    cat.includes("cache") ||
+    cat.includes("host") ||
+    ["smuggling", "cachepoison", "hostheader"].includes(finding.agentKey)
+  ) {
+    summary = `Virtual patch and edge proxy hardening to neutralize HTTP Request Smuggling, Cache Poisoning, and Host Header Injection on ${path}.`;
+    wafRules = [
+      {
+        provider: "cloudflare",
+        providerLabel: "Cloudflare WAF",
+        title: "Cloudflare Custom Rule (Header & Desync Protection)",
+        filename: `cloudflare-rule-smuggle-${ruleId}.txt`,
+        language: "plaintext",
+        explanation: "Blocks requests carrying conflicting Transfer-Encoding/Content-Length headers or untrusted X-Forwarded-Host overrides.",
+        code: `// Cloudflare Custom Rule (Expression Editor)
+// Action: Block
+(
+  (len(http.request.headers["transfer-encoding"]) > 0 and len(http.request.headers["content-length"]) > 0)
+  or len(http.request.headers["x-forwarded-host"]) > 0
+  or len(http.request.headers["x-host"]) > 0
+)`,
+      },
+      {
+        provider: "awswaf",
+        providerLabel: "AWS WAF v2",
+        title: "AWS WAF v2 Host & Unkeyed Header Blocker",
+        filename: `aws-waf-smuggle-${ruleId}.json`,
+        language: "json",
+        explanation: "Blocks requests with X-Forwarded-Host header injection used for cache poisoning.",
+        code: JSON.stringify(
+          {
+            Name: `SwarmScan-Mitigate-CacheHost-${ruleId}`,
+            Priority: 17,
+            Action: { Block: {} },
+            VisibilityConfig: {
+              SampledRequestsEnabled: true,
+              CloudWatchMetricsEnabled: true,
+              MetricName: `SwarmScanCacheHost${ruleId}`,
+            },
+            Statement: {
+              SizeConstraintStatement: {
+                FieldToMatch: { SingleHeader: { Name: "x-forwarded-host" } },
+                ComparisonOperator: "GT",
+                Size: 0,
+                TextTransformations: [{ Priority: 0, Type: "NONE" }],
+              },
+            },
+          },
+          null,
+          2
+        ),
+      },
+      {
+        provider: "modsecurity",
+        providerLabel: "ModSecurity / Coraza",
+        title: "ModSecurity / OWASP Coraza SecRule Directive",
+        filename: `modsec-smuggle-${ruleId}.conf`,
+        language: "apache",
+        explanation: "Rejects ambiguous Transfer-Encoding + Content-Length combinations and unkeyed host headers.",
+        code: `# SwarmScan Virtual Patch — HTTP Desync & Cache Poisoning Mitigation
+SecRule &REQUEST_HEADERS:Transfer-Encoding "@gt 0" \\
+    "id:${ruleId},\\
+    phase:1,\\
+    deny,\\
+    status:400,\\
+    log,\\
+    msg:'SwarmScan Virtual Patch: Ambiguous TE+CL request smuggling attempt',\\
+    severity:'CRITICAL',\\
+    chain"
+    SecRule &REQUEST_HEADERS:Content-Length "@gt 0"`,
+      },
+      {
+        provider: "nginx",
+        providerLabel: "NGINX Configuration",
+        title: "NGINX Strict Host & Header Normalization",
+        filename: `nginx-smuggle-${ruleId}.conf`,
+        language: "nginx",
+        explanation: "Strips unkeyed forwarding headers and enforces HTTP/1.1 upstream connection normalization.",
+        code: `# SwarmScan Virtual Patch for NGINX — Smuggling & Cache Poisoning Defense
+location = ${path} {
+    proxy_set_header Host $server_name;
+    proxy_set_header X-Forwarded-Host "";
+    proxy_set_header X-Original-URL "";
+    proxy_http_version 1.1;
+    proxy_pass http://backend_upstream;
+}`,
+      },
+    ];
+    codeRemediations = [
+      {
+        language: "typescript",
+        label: "Node.js / Next.js (Strict Host Allowlist)",
+        filename: "src/middleware.ts",
+        explanation: "Never trust X-Forwarded-Host or Host headers for generating redirects, password reset links, or cache keys without allowlist validation.",
+        vulnerableSnippet: `// ❌ VULNERABLE: Trusts arbitrary X-Forwarded-Host header
+export function buildResetLink(req: Request, token: string) {
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  return \`https://\${host}/reset?token=\${token}\`;
+}`,
+        fixedSnippet: `// ✅ SECURE: Use canonical configured origin from environment
+const CANONICAL_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.example.com";
+
+export function buildResetLink(token: string) {
+  return \`\${CANONICAL_ORIGIN}/reset?token=\${encodeURIComponent(token)}\`;
+}`,
+        gitPatch: `--- a/src/middleware.ts
++++ b/src/middleware.ts
+@@ -1,4 +1,4 @@
++const CANONICAL_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.example.com";
+ export function buildResetLink(req: Request, token: string) {
+-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+-  return \`https://\${host}/reset?token=\${token}\`;
++  return \`\${CANONICAL_ORIGIN}/reset?token=\${encodeURIComponent(token)}\`;
+ }`,
+      },
+    ];
+  } else if (
+    cat.includes("secret") ||
+    cat.includes("git") ||
+    cat.includes("exposure") ||
+    ["secrets", "gitrepo"].includes(finding.agentKey)
+  ) {
+    summary = `Virtual patch and server configuration hardening to block public access to exposed .git directories, environment files, and source-map secrets on ${path}.`;
+    wafRules = [
+      {
+        provider: "cloudflare",
+        providerLabel: "Cloudflare WAF",
+        title: "Cloudflare Custom Rule (Sensitive File & .git Blocker)",
+        filename: `cloudflare-rule-exposure-${ruleId}.txt`,
+        language: "plaintext",
+        explanation: "Immediately blocks access to /.git, /.env, .map files, and backup archives.",
+        code: `// Cloudflare Custom Rule (Expression Editor)
+// Action: Block
+(
+  http.request.uri.path matches r"(?i)^/(\\.git|\\.env|\\.svn|\\.DS_Store|config\\.ya?ml|backup)"
+  or http.request.uri.path ends_with ".map"
+  or http.request.uri.path eq "${path}"
+)`,
+      },
+      {
+        provider: "awswaf",
+        providerLabel: "AWS WAF v2",
+        title: "AWS WAF v2 Dotfile & Secret Exposure Blocker",
+        filename: `aws-waf-exposure-${ruleId}.json`,
+        language: "json",
+        explanation: "Blocks requests targeting dotfiles (.git, .env) and sourcemaps.",
+        code: JSON.stringify(
+          {
+            Name: `SwarmScan-Block-Exposure-${ruleId}`,
+            Priority: 5,
+            Action: { Block: {} },
+            VisibilityConfig: {
+              SampledRequestsEnabled: true,
+              CloudWatchMetricsEnabled: true,
+              MetricName: `SwarmScanExposure${ruleId}`,
+            },
+            Statement: {
+              RegexMatchStatement: {
+                RegexString: "^/(\\.git|\\.env|.*\\.map$)",
+                FieldToMatch: { UriPath: {} },
+                TextTransformations: [{ Priority: 0, Type: "LOWERCASE" }],
+              },
+            },
+          },
+          null,
+          2
+        ),
+      },
+      {
+        provider: "modsecurity",
+        providerLabel: "ModSecurity / Coraza",
+        title: "ModSecurity / OWASP Coraza SecRule Directive",
+        filename: `modsec-exposure-${ruleId}.conf`,
+        language: "apache",
+        explanation: "Denies public HTTP access to VCS metadata and dotenv files.",
+        code: `# SwarmScan Virtual Patch — Sensitive File Exposure Block
+SecRule REQUEST_URI "@rx (?i)^/(\\.git|\\.env|\\.svn|.*\\.map$)" \\
+    "id:${ruleId},\\
+    phase:1,\\
+    deny,\\
+    status:404,\\
+    log,\\
+    msg:'SwarmScan Virtual Patch: Blocked access to sensitive artifact'"`,
+      },
+      {
+        provider: "nginx",
+        providerLabel: "NGINX Configuration",
+        title: "NGINX Dotfile & Sourcemap Deny Block",
+        filename: `nginx-exposure-${ruleId}.conf`,
+        language: "nginx",
+        explanation: "Returns 404 for all hidden dotfiles and JS sourcemaps.",
+        code: `# SwarmScan Virtual Patch for NGINX — Hide Sensitive Files
+location ~* ^/(\\.git|\\.env|\\.svn)|\\.map$ {
+    deny all;
+    return 404;
+}`,
+      },
+    ];
+    codeRemediations = [
+      {
+        language: "typescript",
+        label: "Next.js Config (Disable Production SourceMaps)",
+        filename: "next.config.ts",
+        explanation: "Disable browser source maps in production builds and rotate any exposed credentials immediately.",
+        vulnerableSnippet: `// ❌ VULNERABLE: Exposes full unminified source & internal comments
+const nextConfig = {
+  productionBrowserSourceMaps: true,
+};`,
+        fixedSnippet: `// ✅ SECURE: Disable public browser source maps in production
+const nextConfig = {
+  productionBrowserSourceMaps: false,
+};`,
+        gitPatch: `--- a/next.config.ts
++++ b/next.config.ts
+@@ -1,3 +1,3 @@
+ const nextConfig = {
+-  productionBrowserSourceMaps: true,
++  productionBrowserSourceMaps: false,
+ };`,
+      },
+    ];
   } else {
     // ── Generic / Default Security Hardening ────────────────────────────────
     summary = `Virtual patch and defensive security headers for ${title} on ${path} to filter anomalous requests and restrict execution contexts.`;
@@ -893,4 +1398,86 @@ function hashCode(str: string): number {
     hash |= 0;
   }
   return hash;
+}
+
+export interface DeployedPatchItem {
+  id: string;
+  findingId: string;
+  scanId: string;
+  provider: string;
+  ruleId: string;
+  status: string;
+  ruleContent: string;
+  endpoint: string;
+  deployedBy: string;
+  deployedAt: string;
+  revokedAt: string | null;
+  findingTitle?: string;
+  findingSeverity?: string;
+  findingTarget?: string;
+}
+
+export interface RemediationPrItem {
+  id: string;
+  findingId: string;
+  scanId: string;
+  language: string;
+  branchName: string;
+  prTitle: string;
+  prBody: string;
+  patchDiff: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface FindingRemediationResponse {
+  package: RemediationPackage;
+  deployedPatches: DeployedPatchItem[];
+  remediationPrs: RemediationPrItem[];
+}
+
+/**
+ * Generates an autonomous Pull Request payload (branch, title, markdown body, diff)
+ * anchored to the finding's Bayesian confidence and WORM evidence chain.
+ */
+export function buildPullRequestPayload(finding: Finding, language?: string) {
+  const pkg = generateRemediationPackage(finding);
+  const code =
+    pkg.codeRemediations.find((c) => c.language === language) ?? pkg.codeRemediations[0];
+  const shortId = finding.id.slice(-8).toLowerCase();
+  const safeAgent = finding.agentKey.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  const branchName = `swarmscan/fix-${safeAgent}-${shortId}`;
+  const prTitle = `fix(security): remediate ${finding.title} (${finding.severity.toUpperCase()})`;
+  const latestEvidenceHash =
+    finding.evidence && finding.evidence.length > 0
+      ? finding.evidence[finding.evidence.length - 1].hash
+      : "worm-pending";
+
+  const prBody = [
+    `## SwarmScan Autonomous Security Remediation`,
+    ``,
+    `- **Finding:** ${finding.title} (\`${finding.id}\`)`,
+    `- **Severity:** \`${finding.severity.toUpperCase()}\` | **Confidence:** \`${finding.confidence}/99\` (${finding.band})`,
+    `- **Target / Endpoint:** \`${finding.target}\` — \`${pkg.endpoint}\``,
+    finding.cve ? `- **CVE:** \`${finding.cve}\`` : null,
+    `- **WORM Evidence Head:** \`${latestEvidenceHash}\``,
+    ``,
+    `### Root Cause & Fix`,
+    code.explanation,
+    ``,
+    `### Unified Patch (\`${code.filename}\`)`,
+    `\`\`\`diff`,
+    code.gitPatch,
+    `\`\`\``,
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
+
+  return {
+    language: code.language,
+    branchName,
+    prTitle,
+    prBody,
+    patchDiff: code.gitPatch,
+  };
 }

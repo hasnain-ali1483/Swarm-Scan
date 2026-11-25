@@ -27,6 +27,7 @@ import { ScopeRuleCard } from "@/components/swarm/policies/scope-rule-card";
 import { ScopeRuleDialog, type ScopeDraft } from "@/components/swarm/policies/scope-rule-dialog";
 import { PayloadRegistry } from "@/components/swarm/policies/payload-registry";
 import { TimeWindowBar } from "@/components/swarm/policies/time-window-bar";
+import { VirtualPatchesPanel } from "@/components/swarm/policies/virtual-patches-panel";
 
 type DeleteTarget =
   | { type: "policy"; item: PolicyItem }
@@ -351,6 +352,11 @@ export function PoliciesView() {
       <div className="mt-10 grid gap-4 lg:grid-cols-2">
         <PayloadRegistry />
         <TimeWindowBar />
+      </div>
+
+      {/* ── Section E — active WAF virtual patches ─────────────────────────── */}
+      <div className="mt-10">
+        <VirtualPatchesPanel />
       </div>
 
       {/* ── Dialogs ───────────────────────────────────────────────────────── */}

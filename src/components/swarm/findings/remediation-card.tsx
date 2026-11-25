@@ -3,10 +3,12 @@
 // ─── Remediation & Virtual Patching Card ──────────────────────────────────────
 // Bridges the gap between vulnerability detection and defense:
 //   • WAF Virtual Patches: Cloudflare, AWS WAF v2, ModSecurity / Coraza, NGINX
+//   • Persistent Edge Deployment & Revocation backed by Prisma VirtualPatch
 //   • Code-Level Remediation: Vulnerable vs Fixed snippets in TS, Python, Go
-//   • Unified Git .patch generation and downloads
+//   • Autonomous Remediation PR Staging & Unified Git .patch downloads
 
 import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ShieldCheck,
   Code2,
@@ -19,23 +21,119 @@ import {
   Zap,
   Layers,
   ArrowRight,
+  GitPullRequest,
+  Loader2,
+  RotateCcw,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import type { Finding } from "@/lib/swarm/types";
-import { generateRemediationPackage, type RemediationPackage } from "@/lib/swarm/remediation";
+import { api, type Finding } from "@/lib/swarm/types";
+import {
+  generateRemediationPackage,
+  type FindingRemediationResponse,
+} from "@/lib/swarm/remediation";
+import { timeAgo } from "@/lib/swarm/format";
 
 export function RemediationCard({ finding }: { finding: Finding }) {
   const { toast } = useToast();
-  const pkg: RemediationPackage = generateRemediationPackage(finding);
+  const queryClient = useQueryClient();
+
+  const fallbackPkg = generateRemediationPackage(finding);
+
+  const { data } = useQuery({
+    queryKey: ["finding-remediation", finding.id],
+    queryFn: () =>
+      api<FindingRemediationResponse>(`/api/findings/${finding.id}/remediation`),
+    initialData: {
+      package: fallbackPkg,
+      deployedPatches: [],
+      remediationPrs: [],
+    },
+  });
+
+  const pkg = data.package;
+  const deployedPatches = data.deployedPatches ?? [];
+  const remediationPrs = data.remediationPrs ?? [];
 
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [activeWaf, setActiveWaf] = useState<string>(pkg.wafRules[0]?.provider || "cloudflare");
   const [activeLang, setActiveLang] = useState<string>(pkg.codeRemediations[0]?.language || "typescript");
-  const [simulatedDeploy, setSimulatedDeploy] = useState<boolean>(false);
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["finding-remediation", finding.id] });
+    void queryClient.invalidateQueries({ queryKey: ["virtual-patches"] });
+  };
+
+  const deployMutation = useMutation({
+    mutationFn: (provider: string) =>
+      api(`/api/findings/${finding.id}/remediation/deploy`, {
+        method: "POST",
+        body: JSON.stringify({ provider }),
+      }),
+    onSuccess: (_res, provider) => {
+      invalidate();
+      const label = pkg.wafRules.find((r) => r.provider === provider)?.providerLabel ?? provider;
+      toast({
+        title: "Virtual Patch Deployed",
+        description: `Edge rule persisted for ${label} on ${pkg.endpoint} and logged to SOC Event Bus.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Virtual Patch deployment failed",
+        description: err instanceof Error ? err.message : "Control plane unreachable",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: (provider: string) =>
+      api(`/api/findings/${finding.id}/remediation/revoke`, {
+        method: "POST",
+        body: JSON.stringify({ provider }),
+      }),
+    onSuccess: (_res, provider) => {
+      invalidate();
+      const label = pkg.wafRules.find((r) => r.provider === provider)?.providerLabel ?? provider;
+      toast({
+        title: "Virtual Patch Revoked",
+        description: `${label} edge rule deactivated for ${pkg.endpoint}.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Revoke failed",
+        description: err instanceof Error ? err.message : "Control plane unreachable",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const prMutation = useMutation({
+    mutationFn: (language: string) =>
+      api(`/api/findings/${finding.id}/remediation/pr`, {
+        method: "POST",
+        body: JSON.stringify({ language }),
+      }),
+    onSuccess: (_res, language) => {
+      invalidate();
+      toast({
+        title: "Autonomous Remediation PR Staged",
+        description: `Created branch and unified patch for ${language} with WORM evidence attestation.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "PR generation failed",
+        description: err instanceof Error ? err.message : "Control plane unreachable",
+        variant: "destructive",
+      });
+    },
+  });
 
   const copyToClipboard = (key: string, text: string, label: string) => {
     void navigator.clipboard.writeText(text);
@@ -65,16 +163,13 @@ export function RemediationCard({ finding }: { finding: Finding }) {
     });
   };
 
-  const handleSimulateDeploy = (providerName: string) => {
-    setSimulatedDeploy(true);
-    toast({
-      title: "Virtual Patch Deployed",
-      description: `Simulated edge deployment to ${providerName}. Zero-day attack surface mitigated.`,
-    });
-  };
-
   const currentWaf = pkg.wafRules.find((r) => r.provider === activeWaf) || pkg.wafRules[0];
   const currentCode = pkg.codeRemediations.find((c) => c.language === activeLang) || pkg.codeRemediations[0];
+
+  const activeDeployedForCurrent = deployedPatches.find(
+    (p) => p.provider === currentWaf?.provider && p.status === "deployed"
+  );
+  const totalActivePatches = deployedPatches.filter((p) => p.status === "deployed").length;
 
   return (
     <Card className="border-emerald-500/30 bg-zinc-950/80 shadow-md">
@@ -85,11 +180,17 @@ export function RemediationCard({ finding }: { finding: Finding }) {
               <ShieldCheck className="h-4 w-4" />
             </div>
             <div>
-              <CardTitle className="text-base font-medium text-zinc-100 flex items-center gap-2">
+              <CardTitle className="text-base font-medium text-zinc-100 flex flex-wrap items-center gap-2">
                 Autonomous Remediation & Virtual Patching
                 <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 font-mono text-[10px] text-emerald-400">
                   <Sparkles className="mr-1 h-2.5 w-2.5" /> Instant Defense
                 </Badge>
+                {totalActivePatches > 0 ? (
+                  <Badge className="border-emerald-500/50 bg-emerald-500/20 font-mono text-[10px] text-emerald-300">
+                    <Zap className="mr-1 h-2.5 w-2.5 fill-emerald-400 text-emerald-400" />
+                    {totalActivePatches} Active at Edge
+                  </Badge>
+                ) : null}
               </CardTitle>
               <CardDescription className="text-xs text-zinc-400">
                 Generated edge firewall rules and source code patches for target endpoint{" "}
@@ -98,18 +199,41 @@ export function RemediationCard({ finding }: { finding: Finding }) {
             </div>
           </div>
 
-          {simulatedDeploy ? (
-            <Badge className="border-emerald-500/50 bg-emerald-500/20 text-emerald-300">
-              <Zap className="mr-1 h-3 w-3 fill-emerald-400 text-emerald-400" /> Virtual Patch Active at Edge
-            </Badge>
+          {activeDeployedForCurrent ? (
+            <div className="flex items-center gap-2">
+              <Badge className="border-emerald-500/50 bg-emerald-500/20 text-emerald-300">
+                <Zap className="mr-1 h-3 w-3 fill-emerald-400 text-emerald-400" />
+                {currentWaf?.providerLabel} Active
+              </Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 border-zinc-700 text-zinc-300 hover:border-red-500/50 hover:text-red-400"
+                disabled={revokeMutation.isPending}
+                onClick={() => currentWaf && revokeMutation.mutate(currentWaf.provider)}
+              >
+                {revokeMutation.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-3.5 w-3.5" />
+                )}
+                Revoke
+              </Button>
+            </div>
           ) : (
             <Button
               size="sm"
               variant="outline"
               className="h-8 gap-1.5 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-              onClick={() => handleSimulateDeploy(currentWaf?.providerLabel || "WAF")}
+              disabled={deployMutation.isPending || !currentWaf}
+              onClick={() => currentWaf && deployMutation.mutate(currentWaf.provider)}
             >
-              <Zap className="h-3.5 w-3.5" /> Deploy Virtual Patch
+              {deployMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Zap className="h-3.5 w-3.5" />
+              )}
+              Deploy to {currentWaf?.providerLabel || "WAF"}
             </Button>
           )}
         </div>
@@ -132,6 +256,9 @@ export function RemediationCard({ finding }: { finding: Finding }) {
             <div className="flex flex-wrap items-center gap-2">
               {pkg.wafRules.map((rule) => {
                 const isSelected = activeWaf === rule.provider;
+                const isDeployed = deployedPatches.some(
+                  (p) => p.provider === rule.provider && p.status === "deployed"
+                );
                 return (
                   <button
                     key={rule.provider}
@@ -145,6 +272,9 @@ export function RemediationCard({ finding }: { finding: Finding }) {
                   >
                     <Terminal className="h-3 w-3" />
                     {rule.providerLabel}
+                    {isDeployed ? (
+                      <span className="ml-1 h-1.5 w-1.5 rounded-full bg-emerald-400" title="Deployed at Edge" />
+                    ) : null}
                   </button>
                 );
               })}
@@ -153,7 +283,14 @@ export function RemediationCard({ finding }: { finding: Finding }) {
             {currentWaf ? (
               <div className="space-y-3">
                 <div className="rounded-md border border-zinc-800/80 bg-zinc-900/40 p-3 text-xs text-zinc-300">
-                  <p className="font-medium text-zinc-200 mb-1">{currentWaf.title}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                    <p className="font-medium text-zinc-200">{currentWaf.title}</p>
+                    {activeDeployedForCurrent ? (
+                      <span className="font-mono text-[10px] text-emerald-400">
+                        deployed {timeAgo(activeDeployedForCurrent.deployedAt)} · id {activeDeployedForCurrent.ruleId}
+                      </span>
+                    ) : null}
+                  </div>
                   <p className="text-zinc-400">{currentWaf.explanation}</p>
                 </div>
 
@@ -198,26 +335,45 @@ export function RemediationCard({ finding }: { finding: Finding }) {
 
           {/* ── TAB 2: CODE-LEVEL REMEDIATION ────────────────────────────────── */}
           <TabsContent value="code" className="space-y-4 outline-none">
-            {/* Language selector pills */}
-            <div className="flex flex-wrap items-center gap-2">
-              {pkg.codeRemediations.map((rem) => {
-                const isSelected = activeLang === rem.language;
-                return (
-                  <button
-                    key={rem.language}
-                    type="button"
-                    onClick={() => setActiveLang(rem.language)}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
-                      isSelected
-                        ? "bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/50"
-                        : "bg-zinc-900/90 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                    }`}
-                  >
-                    <FileCode className="h-3 w-3" />
-                    {rem.label}
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {/* Language selector pills */}
+              <div className="flex flex-wrap items-center gap-2">
+                {pkg.codeRemediations.map((rem) => {
+                  const isSelected = activeLang === rem.language;
+                  return (
+                    <button
+                      key={rem.language}
+                      type="button"
+                      onClick={() => setActiveLang(rem.language)}
+                      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                        isSelected
+                          ? "bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/50"
+                          : "bg-zinc-900/90 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                      }`}
+                    >
+                      <FileCode className="h-3 w-3" />
+                      {rem.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {currentCode ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 gap-1.5 border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-300 hover:bg-emerald-500/20"
+                  disabled={prMutation.isPending}
+                  onClick={() => prMutation.mutate(currentCode.language)}
+                >
+                  {prMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <GitPullRequest className="h-3.5 w-3.5" />
+                  )}
+                  Stage Remediation PR
+                </Button>
+              ) : null}
             </div>
 
             {currentCode ? (
@@ -293,6 +449,49 @@ export function RemediationCard({ finding }: { finding: Finding }) {
                     <code>{currentCode.gitPatch}</code>
                   </pre>
                 </div>
+
+                {/* Staged Autonomous PRs */}
+                {remediationPrs.length > 0 ? (
+                  <div className="space-y-2 rounded-md border border-emerald-500/20 bg-zinc-900/40 p-3">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-300">
+                      <GitPullRequest className="h-3.5 w-3.5" />
+                      Staged Remediation Pull Requests ({remediationPrs.length})
+                    </p>
+                    <div className="space-y-2">
+                      {remediationPrs.map((pr) => (
+                        <div
+                          key={pr.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-zinc-200">{pr.prTitle}</p>
+                            <p className="font-mono text-[11px] text-zinc-400">
+                              branch: {pr.branchName} · {pr.language} · {timeAgo(pr.createdAt)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-400">
+                              {pr.status}
+                            </Badge>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 gap-1 px-2 text-[11px] text-zinc-300 hover:text-white"
+                              onClick={() => copyToClipboard(`pr-${pr.id}`, pr.prBody, "PR Markdown")}
+                            >
+                              {copiedKey === `pr-${pr.id}` ? (
+                                <Check className="h-3 w-3 text-emerald-400" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
+                              Copy PR Body
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </TabsContent>

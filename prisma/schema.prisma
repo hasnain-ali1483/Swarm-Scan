@@ -27,9 +27,11 @@ model Scan {
   createdAt    DateTime      @default(now())
   agentRuns    AgentRun[]
   findings     Finding[]
-  events       EventLog[]
-  chains       AttackChain[]
-  evidence     Evidence[]
+  events         EventLog[]
+  chains         AttackChain[]
+  evidence       Evidence[]
+  virtualPatches VirtualPatch[]
+  remediationPrs RemediationPr[]
 }
 
 model AgentRun {
@@ -67,10 +69,12 @@ model Finding {
   cve         String?
   description String
   pocScript   String?
-  priorOdds   Float      @default(0.02)
-  likelihood  Float      @default(1) // product of evidence likelihood ratios
-  createdAt   DateTime   @default(now())
-  evidence    Evidence[]
+  priorOdds      Float           @default(0.02)
+  likelihood     Float           @default(1) // product of evidence likelihood ratios
+  createdAt      DateTime        @default(now())
+  evidence       Evidence[]
+  virtualPatches VirtualPatch[]
+  remediationPrs RemediationPr[]
 
   @@index([scanId, severity])
   @@index([band])
@@ -266,4 +270,45 @@ model SsoConnection {
   detail     String // entityId / issuer / client id / SCIM endpoint
   userCount  Int      @default(0)
   lastSyncAt DateTime?
+}
+
+// ─── Autonomous Remediation & Instant WAF Virtual Patching ───────────────────
+
+model VirtualPatch {
+  id          String    @id @default(cuid())
+  findingId   String
+  finding     Finding   @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  scanId      String
+  scan        Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  provider    String // cloudflare | awswaf | modsecurity | nginx
+  ruleId      String
+  status      String    @default("deployed") // deployed | revoked
+  ruleContent String
+  endpoint    String
+  deployedBy  String    @default("operator")
+  deployedAt  DateTime  @default(now())
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([findingId, provider])
+  @@index([scanId])
+  @@index([status])
+}
+
+model RemediationPr {
+  id         String   @id @default(cuid())
+  findingId  String
+  finding    Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  scanId     String
+  scan       Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  language   String // typescript | python | go
+  branchName String
+  prTitle    String
+  prBody     String
+  patchDiff  String
+  status     String   @default("opened") // opened | merged | closed
+  createdAt  DateTime @default(now())
+
+  @@index([findingId])
+  @@index([scanId])
 }
