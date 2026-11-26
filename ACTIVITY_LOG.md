@@ -117,11 +117,15 @@ The **Autonomous Remediation & Instant WAF Virtual Patching Suite** bridges this
 | `src/components/swarm/views/reports-view.tsx` | Added *"Virtual Patches & Remediation"* tab to Reports view |
 | `src/app/api/reports/route.ts` | Added `format=remediation` handler |
 | `src/lib/swarm/types.ts` | Extended `ReportResponse` interface with `remediation` format |
+| `src/app/api/virtual-patches/bulk/route.ts` | Bulk scan-level virtual patch deployment endpoint with WAF connector check |
+| `src/lib/swarm/integrations-catalog.ts` | Added `cloudflare-waf` and `aws-waf` outbound SOAR connectors |
+| `src/components/swarm/integrations/integration-meta.ts` | Mapped icons and tints for `cloudflare-waf` and `aws-waf` |
+| `src/components/swarm/findings/findings-list.tsx` | Added `Shielded` badge for findings with active edge virtual patches |
 
 ---
 
 ## 5. Verification & Git Commit
 
-* **Git Commit:** `07333c6 feat: implement autonomous remediation and instant WAF virtual patching suite`
-* **Log Commit:** `287e92b docs: add comprehensive activity log and update worklog`
+* **Initial Feature Commit:** `07333c6 feat: implement autonomous remediation and instant WAF virtual patching suite`
+* **Persistence & Expanded Coverage:** `cfab7c2 feat: persist virtual patches and remediation PRs with expanded vuln coverage and policies panel`
 * **Remote Status:** All changes committed and pushed to `main` on [hasnain-ali1483/Swarm-Scan](https://github.com/hasnain-ali1483/Swarm-Scan).

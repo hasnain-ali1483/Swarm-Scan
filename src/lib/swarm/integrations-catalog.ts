@@ -633,6 +633,46 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
       },
     ],
   },
+  {
+    key: "cloudflare-waf",
+    name: "Cloudflare WAF",
+    category: "soar",
+    direction: "outbound",
+    auth: "token",
+    description: "Edge Web Application Firewall custom rulesets for instant virtual patching.",
+    agentBenefit: "Automatically deploys scoped custom expression rules to block verified exploits at the CDN edge.",
+    cautions: [
+      "Overly broad regex expressions blocking legitimate traffic",
+      "Deploying without rate-limit or path scoping",
+    ],
+    guardrails: { requiresApproval: true, rateLimitPerMin: 10 },
+    refPrefix: "CF-WAF",
+    fields: [
+      { key: "zone_id", label: "Zone ID", required: true, placeholder: "023e105f4ecef8ad9ca31a8372d0c353" },
+      { key: "api_token", label: "API token", secret: true, required: true },
+      { key: "ruleset_id", label: "Custom Ruleset ID", placeholder: "auto-resolved if omitted" },
+    ],
+  },
+  {
+    key: "aws-waf",
+    name: "AWS WAF v2",
+    category: "soar",
+    direction: "outbound",
+    auth: "api-key",
+    description: "AWS WAF v2 WebACL rule groups for CloudFront, ALB, and API Gateway virtual patching.",
+    agentBenefit: "Deploys structured JSON WebACL statements (SqliMatch, XssMatch, RegexMatch) to shield AWS workloads.",
+    cautions: [
+      "Exceeding WebACL WCU capacity limits",
+      "Missing Scope (REGIONAL vs CLOUDFRONT) alignment",
+    ],
+    guardrails: { requiresApproval: true, rateLimitPerMin: 10 },
+    refPrefix: "AWS-WAF",
+    fields: [
+      { key: "web_acl_arn", label: "WebACL ARN", required: true, placeholder: "arn:aws:wafv2:us-east-1:..." },
+      { key: "access_key_id", label: "IAM Access Key ID", required: true },
+      { key: "secret_access_key", label: "IAM Secret Access Key", secret: true, required: true },
+    ],
+  },
 
   // ─── Communication ──────────────────────────────────────────────────────────
   {

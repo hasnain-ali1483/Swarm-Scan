@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, Search, Siren, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, ShieldCheck, Siren, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,7 +68,15 @@ function confidenceBarColor(confidence: number): string {
 
 // ─── Row (grid on lg, card below) ────────────────────────────────────────────
 
-function FindingRow({ finding, onOpen }: { finding: Finding; onOpen: () => void }) {
+function FindingRow({
+  finding,
+  shielded,
+  onOpen,
+}: {
+  finding: Finding;
+  shielded: boolean;
+  onOpen: () => void;
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
@@ -96,9 +104,21 @@ function FindingRow({ finding, onOpen }: { finding: Finding; onOpen: () => void 
 
       {/* title + target */}
       <div className="min-w-0">
-        <p className="line-clamp-2 text-sm font-medium leading-snug text-zinc-100 group-hover:text-white">
-          {finding.title}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="line-clamp-2 text-sm font-medium leading-snug text-zinc-100 group-hover:text-white">
+            {finding.title}
+          </p>
+          {shielded ? (
+            <Badge
+              variant="outline"
+              className="border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0 text-[10px] text-emerald-400"
+              title="Active WAF Virtual Patch deployed at edge"
+            >
+              <ShieldCheck className="mr-1 h-2.5 w-2.5" aria-hidden />
+              Shielded
+            </Badge>
+          ) : null}
+        </div>
         <p className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
           {finding.endpoint ? `${finding.target}${finding.endpoint}` : finding.target}
         </p>
@@ -199,6 +219,17 @@ export function FindingsList() {
     queryFn: () => api<FindingsListResponse>(`/api/findings?${queryString}`),
     placeholderData: keepPreviousData,
   });
+
+  const { data: patchesData } = useQuery({
+    queryKey: ["virtual-patches", "deployed"],
+    queryFn: () =>
+      api<{ patches: { findingId: string }[] }>("/api/virtual-patches?status=deployed"),
+  });
+
+  const shieldedIds = useMemo(
+    () => new Set((patchesData?.patches ?? []).map((p) => p.findingId)),
+    [patchesData]
+  );
 
   const findings = data?.findings ?? [];
   const total = data?.total ?? 0;
@@ -377,7 +408,12 @@ export function FindingsList() {
 
           <div className={cn("space-y-2 transition-opacity", isFetching && "opacity-60")}>
             {findings.map((f) => (
-              <FindingRow key={f.id} finding={f} onOpen={() => openFinding(f.id)} />
+              <FindingRow
+                key={f.id}
+                finding={f}
+                shielded={shieldedIds.has(f.id)}
+                onOpen={() => openFinding(f.id)}
+              />
             ))}
           </div>
 

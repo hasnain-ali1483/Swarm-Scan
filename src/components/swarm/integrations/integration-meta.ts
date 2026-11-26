@@ -120,6 +120,8 @@ export const INTEGRATION_META: Record<string, IntegrationMeta> = {
   swimlane: { icon: Waves, tint: TINT.lime },
   torq: { icon: Zap, tint: TINT.lime },
   shuffle: { icon: Shuffle, tint: TINT.lime },
+  "cloudflare-waf": { icon: ShieldCheck, tint: TINT.lime },
+  "aws-waf": { icon: ShieldHalf, tint: TINT.lime },
   // communication — green
   slack: { icon: MessageSquare, tint: TINT.green },
   teams: { icon: Users, tint: TINT.green },

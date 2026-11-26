@@ -4,6 +4,7 @@
 // Displays bulk virtual patches and source code fixes for all findings in a scan.
 
 import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ShieldCheck,
   Download,
@@ -14,18 +15,27 @@ import {
   Terminal,
   FileCode,
   Zap,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useSwarmUi } from "@/lib/swarm/ui-store";
 import { BAND_STYLES, SEVERITY_STYLES, cn } from "@/lib/swarm/format";
-import type { Finding, ReportResponse } from "@/lib/swarm/types";
+import { api, type Finding, type ReportResponse } from "@/lib/swarm/types";
 import { generateRemediationPackage, type RemediationPackage } from "@/lib/swarm/remediation";
 
 export function RemediationReport({ report }: { report: ReportResponse }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const setView = useSwarmUi((s) => s.setView);
   const openFinding = useSwarmUi((s) => s.openFinding);
 
@@ -34,6 +44,40 @@ export function RemediationReport({ report }: { report: ReportResponse }) {
 
   const [expandedId, setExpandedId] = useState<string | null>(packages[0]?.findingId ?? null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [bulkProvider, setBulkProvider] = useState<"cloudflare" | "awswaf" | "modsecurity" | "nginx">("cloudflare");
+  const [bulkScope, setBulkScope] = useState<"all" | "high_critical" | "confirmed">("all");
+
+  const bulkDeploy = useMutation({
+    mutationFn: () =>
+      api<{ deployedCount: number; provider: string; integrationConnected: boolean }>(
+        "/api/virtual-patches/bulk",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            scanId: report.scanId,
+            provider: bulkProvider,
+            scope: bulkScope,
+          }),
+        }
+      ),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ["virtual-patches"] });
+      void queryClient.invalidateQueries({ queryKey: ["finding-remediation"] });
+      toast({
+        title: "Bulk Virtual Patches Deployed",
+        description: `Activated ${res.deployedCount} ${res.provider} rules${
+          res.integrationConnected ? " (dispatched via connected WAF integration)" : " in local edge registry"
+        }.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Bulk deploy failed",
+        description: err instanceof Error ? err.message : "Control plane unreachable",
+        variant: "destructive",
+      });
+    },
+  });
 
   const copyToClipboard = (key: string, text: string, label: string) => {
     void navigator.clipboard.writeText(text);
@@ -165,6 +209,60 @@ export function RemediationReport({ report }: { report: ReportResponse }) {
               >
                 <Download className="h-3.5 w-3.5" />
                 All Git Patches (.patch)
+              </Button>
+            </div>
+          </div>
+
+          {/* ── Bulk Edge Deployment Bar ───────────────────────────────────── */}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-800/90 bg-zinc-900/50 p-3">
+            <div className="flex items-center gap-2 text-xs text-zinc-300">
+              <Layers className="h-4 w-4 text-emerald-400" />
+              <span>One-click Edge Shielding: deploy virtual patches across this scan to your WAF</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={bulkProvider}
+                onValueChange={(v) =>
+                  setBulkProvider(v as "cloudflare" | "awswaf" | "modsecurity" | "nginx")
+                }
+              >
+                <SelectTrigger className="h-8 w-[165px] bg-zinc-950 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cloudflare">Cloudflare WAF</SelectItem>
+                  <SelectItem value="awswaf">AWS WAF v2</SelectItem>
+                  <SelectItem value="modsecurity">ModSecurity / Coraza</SelectItem>
+                  <SelectItem value="nginx">NGINX</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={bulkScope}
+                onValueChange={(v) => setBulkScope(v as "all" | "high_critical" | "confirmed")}
+              >
+                <SelectTrigger className="h-8 w-[160px] bg-zinc-950 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Findings ({packages.length})</SelectItem>
+                  <SelectItem value="high_critical">Critical & High Only</SelectItem>
+                  <SelectItem value="confirmed">Confirmed Band Only</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 bg-emerald-600 text-xs text-white hover:bg-emerald-500"
+                disabled={bulkDeploy.isPending}
+                onClick={() => bulkDeploy.mutate()}
+              >
+                {bulkDeploy.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Zap className="h-3.5 w-3.5" />
+                )}
+                {bulkDeploy.isPending ? "Deploying…" : "Deploy All to WAF"}
               </Button>
             </div>
           </div>
