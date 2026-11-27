@@ -115,20 +115,47 @@ export function RemediationCard({ finding }: { finding: Finding }) {
 
   const prMutation = useMutation({
     mutationFn: (language: string) =>
-      api(`/api/findings/${finding.id}/remediation/pr`, {
-        method: "POST",
-        body: JSON.stringify({ language }),
-      }),
-    onSuccess: (_res, language) => {
+      api<{ integrationConnected?: boolean; vcsProvider?: string | null }>(
+        `/api/findings/${finding.id}/remediation/pr`,
+        {
+          method: "POST",
+          body: JSON.stringify({ language }),
+        }
+      ),
+    onSuccess: (res, language) => {
       invalidate();
       toast({
         title: "Autonomous Remediation PR Staged",
-        description: `Created branch and unified patch for ${language} with WORM evidence attestation.`,
+        description: `Created branch and unified patch for ${language}${
+          res?.integrationConnected && res.vcsProvider ? ` via ${res.vcsProvider}` : ""
+        } with WORM evidence attestation.`,
       });
     },
     onError: (err) => {
       toast({
         title: "PR generation failed",
+        description: err instanceof Error ? err.message : "Control plane unreachable",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const prStatusMutation = useMutation({
+    mutationFn: ({ prId, status }: { prId: string; status: "opened" | "merged" | "closed" }) =>
+      api(`/api/findings/${finding.id}/remediation/pr`, {
+        method: "PATCH",
+        body: JSON.stringify({ prId, status }),
+      }),
+    onSuccess: (_res, { status }) => {
+      invalidate();
+      toast({
+        title: `PR marked ${status}`,
+        description: `Remediation pull request status updated to ${status}.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "PR update failed",
         description: err instanceof Error ? err.message : "Control plane unreachable",
         variant: "destructive",
       });
@@ -469,10 +496,41 @@ export function RemediationCard({ finding }: { finding: Finding }) {
                               branch: {pr.branchName} · {pr.language} · {timeAgo(pr.createdAt)}
                             </p>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-400">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge
+                              variant="outline"
+                              className={
+                                pr.status === "merged"
+                                  ? "border-teal-500/40 bg-teal-500/10 text-[10px] text-teal-300"
+                                  : pr.status === "closed"
+                                    ? "border-zinc-700 bg-zinc-900 text-[10px] text-zinc-400"
+                                    : "border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-400"
+                              }
+                            >
                               {pr.status}
                             </Badge>
+                            {pr.status === "opened" ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2 text-[11px] text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                                  disabled={prStatusMutation.isPending}
+                                  onClick={() => prStatusMutation.mutate({ prId: pr.id, status: "merged" })}
+                                >
+                                  Mark Merged
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2 text-[11px] text-zinc-400 hover:text-red-400"
+                                  disabled={prStatusMutation.isPending}
+                                  onClick={() => prStatusMutation.mutate({ prId: pr.id, status: "closed" })}
+                                >
+                                  Close
+                                </Button>
+                              </>
+                            ) : null}
                             <Button
                               size="sm"
                               variant="ghost"

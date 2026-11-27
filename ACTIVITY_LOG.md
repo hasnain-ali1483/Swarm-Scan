@@ -120,7 +120,9 @@ The **Autonomous Remediation & Instant WAF Virtual Patching Suite** bridges this
 | `src/app/api/virtual-patches/bulk/route.ts` | Bulk scan-level virtual patch deployment endpoint with WAF connector check |
 | `src/lib/swarm/integrations-catalog.ts` | Added `cloudflare-waf` and `aws-waf` outbound SOAR connectors |
 | `src/components/swarm/integrations/integration-meta.ts` | Mapped icons and tints for `cloudflare-waf` and `aws-waf` |
-| `src/components/swarm/findings/findings-list.tsx` | Added `Shielded` badge for findings with active edge virtual patches |
+| `src/components/swarm/findings/findings-list.tsx` | Added `Shielded` badge, shielded count pill, and `Defense` filter (`all` / `shielded` / `unshielded`) |
+| `src/app/api/findings/[id]/remediation/pr/route.ts` | Added GitHub/GitLab integration check on `POST` and `PATCH` handler for PR status (`opened` / `merged` / `closed`) |
+| `src/components/swarm/policies/virtual-patches-panel.tsx` | Added **Export Active Bundle** action to download all active rules for the selected WAF provider |
 
 ---
 
@@ -128,4 +130,5 @@ The **Autonomous Remediation & Instant WAF Virtual Patching Suite** bridges this
 
 * **Initial Feature Commit:** `07333c6 feat: implement autonomous remediation and instant WAF virtual patching suite`
 * **Persistence & Expanded Coverage:** `cfab7c2 feat: persist virtual patches and remediation PRs with expanded vuln coverage and policies panel`
+* **Bulk Deploy & Shielded Badges:** `2ba9ea0 feat: add bulk WAF virtual patch deployment, WAF connectors, and Shielded finding badges`
 * **Remote Status:** All changes committed and pushed to `main` on [hasnain-ali1483/Swarm-Scan](https://github.com/hasnain-ali1483/Swarm-Scan).

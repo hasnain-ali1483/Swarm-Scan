@@ -169,6 +169,7 @@ export function FindingsList() {
 
   const [severities, setSeverities] = useState<Severity[]>([]);
   const [band, setBand] = useState<BandFilter>("all");
+  const [shieldFilter, setShieldFilter] = useState<"all" | "shielded" | "unshielded">("all");
   const [agentKey, setAgentKey] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
@@ -232,6 +233,11 @@ export function FindingsList() {
   );
 
   const findings = data?.findings ?? [];
+  const visibleFindings = useMemo(() => {
+    if (shieldFilter === "shielded") return findings.filter((f) => shieldedIds.has(f.id));
+    if (shieldFilter === "unshielded") return findings.filter((f) => !shieldedIds.has(f.id));
+    return findings;
+  }, [findings, shieldFilter, shieldedIds]);
   const total = data?.total ?? 0;
   const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const start = total === 0 ? 0 : (data?.page ?? page) * PAGE_SIZE - PAGE_SIZE + 1;
@@ -242,11 +248,16 @@ export function FindingsList() {
   };
 
   const hasActiveFilters =
-    severities.length > 0 || band !== "all" || agentKey !== "all" || debouncedQ.length > 0;
+    severities.length > 0 ||
+    band !== "all" ||
+    shieldFilter !== "all" ||
+    agentKey !== "all" ||
+    debouncedQ.length > 0;
 
   const clearFilters = () => {
     setSeverities([]);
     setBand("all");
+    setShieldFilter("all");
     setAgentKey("all");
     setSearch("");
   };
@@ -261,10 +272,21 @@ export function FindingsList() {
             Bayesian confidence model · every finding carries a reproducible evidence chain
           </p>
         </div>
-        <Badge variant="outline" className="gap-1.5 bg-card/60 font-mono text-[11px] text-zinc-400">
-          <Siren className="h-3 w-3 text-primary" aria-hidden />
-          {formatNumber(total)} total
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          {shieldedIds.size > 0 ? (
+            <Badge
+              variant="outline"
+              className="gap-1.5 border-emerald-500/40 bg-emerald-500/10 font-mono text-[11px] text-emerald-400"
+            >
+              <ShieldCheck className="h-3 w-3" aria-hidden />
+              {shieldedIds.size} shielded
+            </Badge>
+          ) : null}
+          <Badge variant="outline" className="gap-1.5 bg-card/60 font-mono text-[11px] text-zinc-400">
+            <Siren className="h-3 w-3 text-primary" aria-hidden />
+            {formatNumber(total)} total
+          </Badge>
+        </div>
       </div>
 
       {/* Filters */}
@@ -320,6 +342,26 @@ export function FindingsList() {
               )}
             >
               {BAND_STYLES[b].label}
+            </button>
+          ))}
+          <span className="mx-1 hidden h-4 w-px bg-zinc-800 sm:block" aria-hidden />
+          <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-zinc-500">Defense</span>
+          {(["all", "shielded", "unshielded"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              aria-pressed={shieldFilter === s}
+              onClick={() => setShieldFilter(s)}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px] font-medium capitalize transition-colors",
+                shieldFilter === s
+                  ? s === "shielded"
+                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                    : "border-zinc-500/60 bg-zinc-800 text-zinc-200"
+                  : "border-zinc-700/60 bg-zinc-900/40 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300"
+              )}
+            >
+              {s}
             </button>
           ))}
         </div>
@@ -407,7 +449,7 @@ export function FindingsList() {
           </div>
 
           <div className={cn("space-y-2 transition-opacity", isFetching && "opacity-60")}>
-            {findings.map((f) => (
+            {visibleFindings.map((f) => (
               <FindingRow
                 key={f.id}
                 finding={f}

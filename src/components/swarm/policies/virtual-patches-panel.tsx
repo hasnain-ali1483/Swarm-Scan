@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   Copy,
+  Download,
   ExternalLink,
   Loader2,
   RotateCcw,
@@ -92,6 +93,30 @@ export function VirtualPatchesPanel() {
     setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 2000);
   };
 
+  const exportActiveBundle = () => {
+    const active = filtered.filter((p) => p.status === "deployed");
+    if (active.length === 0) return;
+    const body = active
+      .map(
+        (p) =>
+          `# [${PROVIDER_LABELS[p.provider] ?? p.provider}] ${p.findingTitle ?? p.endpoint} (${p.ruleId})\n${p.ruleContent}`
+      )
+      .join("\n\n");
+    const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `swarmscan-active-${providerFilter}-patches.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast({
+      title: "Active Bundle Exported",
+      description: `Downloaded ${active.length} active virtual patch rule(s).`,
+    });
+  };
+
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -113,6 +138,16 @@ export function VirtualPatchesPanel() {
           <Badge variant="outline" className="border-zinc-700 bg-zinc-900 font-mono text-[11px] text-zinc-400">
             {data?.summary.revoked ?? 0} revoked
           </Badge>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1.5 border-emerald-500/40 bg-emerald-500/10 px-2.5 text-xs text-emerald-300 hover:bg-emerald-500/20"
+            disabled={filtered.filter((p) => p.status === "deployed").length === 0}
+            onClick={exportActiveBundle}
+          >
+            <Download className="h-3 w-3" />
+            Export Active Bundle
+          </Button>
         </div>
       </div>
 
